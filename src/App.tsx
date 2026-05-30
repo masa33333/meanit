@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { Analysis, Level, Message } from "./types";
-import { sendTurn, sendCorrection } from "./lib/api";
-import { speak, makeRecognition, sttSupported } from "./lib/speech";
+import { sendTurn, sendCorrection, transcribe } from "./lib/api";
+import { speak, recorderSupported, blobToBase64 } from "./lib/speech";
 import CoachCard from "./components/CoachCard";
 import LogPanel from "./components/LogPanel";
 
@@ -30,9 +30,13 @@ export default function App() {
   const [correctText, setCorrectText] = useState("");
   const [level, setLevel] = useState<Level>("easy");
   const [voiceOn, setVoiceOn] = useState(true);
-  const [listening, setListening] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [micOk, setMicOk] = useState(true);
-  const recogRef = useRef<ReturnType<typeof makeRecognition>>(null);
+  const [micError, setMicError] = useState("");
+  const mediaRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,7 +50,7 @@ export default function App() {
     } catch {
       /* ignore */
     }
-    if (!sttSupported()) setMicOk(false);
+    if (!recorderSupported()) setMicOk(false);
   }, []);
 
   async function handleSend() {
@@ -138,46 +142,63 @@ export default function App() {
     }));
   }
 
-  function startListening() {
-    const r = makeRecognition();
-    if (!r) {
+  async function startRecording() {
+    if (!recorderSupported()) {
       setMicOk(false);
       return;
     }
+    setMicError("");
     try {
       window.speechSynthesis?.cancel();
     } catch {
       /* ignore */
     }
-    recogRef.current = r;
-    const base = input.trim();
-    r.onresult = (e) => {
-      let transcript = "";
-      for (let i = 0; i < e.results.length; i++)
-        transcript += e.results[i][0].transcript;
-      setInput((base ? base + " " : "") + transcript);
-    };
-    r.onerror = (e) => {
-      setListening(false);
-      if (e.error === "not-allowed" || e.error === "service-not-allowed")
-        setMicOk(false);
-    };
-    r.onend = () => setListening(false);
     try {
-      r.start();
-      setListening(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const mr = new MediaRecorder(stream);
+      mediaRef.current = mr;
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        const mime = mr.mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type: mime });
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        if (blob.size === 0) {
+          setTranscribing(false);
+          return;
+        }
+        setTranscribing(true);
+        try {
+          const b64 = await blobToBase64(blob);
+          const text = await transcribe(b64, mime);
+          if (text)
+            setInput((cur) => (cur.trim() ? cur.trim() + " " : "") + text);
+          else setMicError("うまく聞き取れませんでした。もう一度試してください。");
+        } catch {
+          setMicError("音声の変換に失敗しました。もう一度試してください。");
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      mr.start();
+      setRecording(true);
     } catch {
-      setListening(false);
+      setMicError("マイクを使えませんでした。ブラウザのマイク許可を確認してください。");
+      setRecording(false);
     }
   }
 
-  function stopListening() {
+  function stopRecording() {
     try {
-      recogRef.current?.stop();
+      mediaRef.current?.stop();
     } catch {
       /* ignore */
     }
-    setListening(false);
+    setRecording(false);
   }
 
   const logEntries = Object.entries(analyses)
@@ -348,18 +369,22 @@ export default function App() {
       </main>
 
       {/* input */}
+      {micError && (
+        <div className="px-4 pb-1 text-[11.5px] text-coach">{micError}</div>
+      )}
       <div className="sticky bottom-0 flex items-end gap-[9px] border-t border-[rgba(43,38,34,0.12)] bg-canvas px-4 pb-[18px] pt-3">
         {micOk && (
           <button
-            onClick={listening ? stopListening : startListening}
+            onClick={recording ? stopRecording : startRecording}
+            disabled={transcribing}
             className={`flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-[13px] ${
-              listening
+              recording
                 ? "animate-pulseMic border border-coach bg-coach text-sm text-white"
-                : "border border-[rgba(43,38,34,0.12)] bg-paper text-lg"
+                : "border border-[rgba(43,38,34,0.12)] bg-paper text-lg disabled:opacity-50"
             }`}
-            title={listening ? "とめる" : "話す"}
+            title={recording ? "とめる" : transcribing ? "変換中" : "話す"}
           >
-            {listening ? "■" : "🎤"}
+            {transcribing ? "…" : recording ? "■" : "🎤"}
           </button>
         )}
         <textarea

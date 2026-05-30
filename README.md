@@ -7,14 +7,15 @@
 ## アーキテクチャ（重要）
 
 ```
-ブラウザ (React)  ──POST /api/chat──▶  サーバー (handler)  ──▶  Anthropic API
-   ↑ キーもプロンプトも見えない          ↑ ANTHROPIC_API_KEY を保持
-                                        ↑ SYSTEM/LEVELS プロンプトを保持
+ブラウザ (React)  ──POST /api/chat──────▶  サーバー  ──▶  Anthropic API（会話・コーチ）
+   ↑ キーもプロンプトも見えない          ──POST /api/transcribe──▶  OpenAI Whisper（音声→テキスト）
+                                        ↑ ANTHROPIC_API_KEY / OPENAI_API_KEY を保持
 ```
 
-- **APIキーは絶対にクライアントに出ない。** ブラウザは自分のサーバー `/api/chat` だけを叩く。
+- **APIキーは絶対にクライアントに出ない。** ブラウザは自分のサーバー `/api/*` だけを叩く。
 - **プロンプト（methodology）もサーバー側だけ。** `server/prompts.ts` に置き、クライアントには配信しない。IP保護とプロキシ悪用防止を兼ねる。
-- 開発時は Vite の dev サーバーに API を同居させる（`vite.config.ts` のプラグイン）。本番は `api/chat.ts`（サーバーレス）が同じ `server/handler.ts` を共有する。
+- **音声入力は Whisper 方式。** ブラウザ内蔵の音声認識（Web Speech）は Brave 等で動かないため使わない。録音（MediaRecorder）→ `/api/transcribe` → OpenAI Whisper。全ブラウザ・全端末で動く。
+- 開発時は Vite の dev サーバーに API を同居させる（`vite.config.ts` のプラグイン）。本番は `api/*.ts`（サーバーレス）が同じ `server/*.ts` を共有する。
 
 ## セットアップ
 

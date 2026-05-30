@@ -38,3 +38,17 @@ export function sendCorrection(
 ): Promise<CorrectionResult> {
   return post<CorrectionResult>({ kind: "correction", said, intent });
 }
+
+export async function transcribe(
+  audioBase64: string,
+  mimeType: string
+): Promise<string> {
+  const res = await fetch("/api/transcribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ audio: audioBase64, mimeType }),
+  });
+  if (!res.ok) throw new Error(`transcribe ${res.status}`);
+  const data = (await res.json()) as { text?: string };
+  return data.text || "";
+}

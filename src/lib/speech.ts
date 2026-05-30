@@ -1,5 +1,7 @@
-// ブラウザの Web Speech API ラッパ。
-// TTS = 相手が喋る / STT = 自分が喋る（入力手段。発音は採点しない）。
+// ブラウザ音声ヘルパ。
+// TTS = 相手が喋る（Web Speech Synthesis、これは全ブラウザで安定）。
+// 入力（自分が喋る）= MediaRecorder で録音し、サーバー経由で Whisper に文字起こしさせる。
+//   ブラウザ内蔵の音声認識（Web Speech Recognition）は Brave 等で動かないため使わない。
 
 export function speak(text: string): void {
   try {
@@ -25,35 +27,24 @@ export function speak(text: string): void {
   }
 }
 
-interface SpeechRecognitionLike {
-  lang: string;
-  interimResults: boolean;
-  continuous: boolean;
-  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
-  onerror: ((e: { error: string }) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-}
-interface SpeechRecognitionEventLike {
-  results: ArrayLike<ArrayLike<{ transcript: string }>>;
+export function recorderSupported(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices &&
+    typeof navigator.mediaDevices.getUserMedia === "function" &&
+    typeof window.MediaRecorder !== "undefined"
+  );
 }
 
-export function makeRecognition(): SpeechRecognitionLike | null {
-  const w = window as unknown as {
-    SpeechRecognition?: new () => SpeechRecognitionLike;
-    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
-  };
-  const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
-  if (!SR) return null;
-  const r = new SR();
-  r.lang = "en-US";
-  r.interimResults = true;
-  r.continuous = false;
-  return r;
-}
-
-export function sttSupported(): boolean {
-  const w = window as unknown as Record<string, unknown>;
-  return !!(w.SpeechRecognition || w.webkitSpeechRecognition);
+export function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
